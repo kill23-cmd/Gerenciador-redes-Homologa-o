@@ -56,7 +56,12 @@ COMMAND_PROFILES = {
     'huawei_switch': [
         ('Mostrar vizinhos LLDP', 'display lldp ne brief')
     ],
-    'default': [] # Perfil padrão, sem comandos
+    # --- NOVO: Perfil para APs ---
+    'access_point': [
+        # Você pode adicionar comandos 'show' específicos de APs aqui
+        ('Mostrar vizinhos CDP', 'show cdp neighbors') 
+    ],
+    'default': [] 
 }
 
 # --- DEFINIÇÃO DOS SNIPPETS DE CONFIGURAÇÃO POR VENDOR ---
@@ -86,20 +91,24 @@ VENDOR_CONFIG_SNIPPETS = {
     },
     'cisco_router': {},
     'fortinet_firewall': {},
+    'access_point': {
+        # Você pode adicionar snippets de configuração de APs aqui
+        "Configurar Descrição": "interface {INTERFACE}\n description AP_SALA_REUNIAO"
+    },
     'default': {}
 }
 
 
-# --- ATUALIZADO: Termos de Busca (Híbrido) ---
-# 1. Busca por CHAVES (Padrão e universal)
-ZABBIX_DASHBOARD_KEY_SEARCH = [
-    "system.uptime",
-    "icmpping",
-    "icmppingloss",
-    "system.cpu.util"
-]
-# 2. Busca por NOMES (Específico do equipamento)
-ZABBIX_DASHBOARD_NAME_SEARCH = [
+# --- ATUALIZADO: Termos de Busca (NOMES) ---
+# ⚠️ ATENÇÃO: Verifique se esses nomes genéricos
+# correspondem aos nomes dos seus itens no Zabbix!
+ZABBIX_DASHBOARD_SEARCH_NAMES = [
+    # Itens Padrão (buscados por NOME)
+    "CPU utilization",
+    "ICMP response time", # <--- CORRIGIDO (baseado na sua foto do Grafana)
+    "ICMP packet loss",
+    "System uptime",
+    
     # Itens de Switch/Router (NOMES)
     "Number of interfaces in operational state down",
     
@@ -217,16 +226,24 @@ class MainApplication(tk.Tk):
         dash_grid.columnconfigure(3, weight=1)
         
         # --- Métricas Base (Estáticas) ---
-        ttk.Label(dash_grid, text="Disponibilidade:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
-        ttk.Label(dash_grid, textvariable=self.dash_value_vars['uptime']).grid(row=0, column=1, sticky="w", padx=5, pady=2)
+        self.dash_name_labels = {} # NOVO: Armazena os labels dos NOMES
+        self.dash_name_labels['uptime'] = ttk.Label(dash_grid, text="Disponibilidade:")
+        self.dash_name_labels['uptime'].grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.dash_value_labels['uptime'] = ttk.Label(dash_grid, textvariable=self.dash_value_vars['uptime'])
+        self.dash_value_labels['uptime'].grid(row=0, column=1, sticky="w", padx=5, pady=2)
         
-        ttk.Label(dash_grid, text="CPU:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
-        ttk.Label(dash_grid, textvariable=self.dash_value_vars['cpu']).grid(row=1, column=1, sticky="w", padx=5, pady=2)
+        self.dash_name_labels['cpu'] = ttk.Label(dash_grid, text="CPU:")
+        self.dash_name_labels['cpu'].grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        self.dash_value_labels['cpu'] = ttk.Label(dash_grid, textvariable=self.dash_value_vars['cpu'])
+        self.dash_value_labels['cpu'].grid(row=1, column=1, sticky="w", padx=5, pady=2)
         
-        ttk.Label(dash_grid, text="Latência:").grid(row=2, column=0, sticky="w", padx=5, pady=2)
-        ttk.Label(dash_grid, textvariable=self.dash_value_vars['latency']).grid(row=2, column=1, sticky="w", padx=5, pady=2)
+        self.dash_name_labels['latency'] = ttk.Label(dash_grid, text="Latência:")
+        self.dash_name_labels['latency'].grid(row=2, column=0, sticky="w", padx=5, pady=2)
+        self.dash_value_labels['latency'] = ttk.Label(dash_grid, textvariable=self.dash_value_vars['latency'])
+        self.dash_value_labels['latency'].grid(row=2, column=1, sticky="w", padx=5, pady=2)
 
-        ttk.Label(dash_grid, text="Perda de Pacotes:").grid(row=3, column=0, sticky="w", padx=5, pady=2)
+        self.dash_name_labels['loss'] = ttk.Label(dash_grid, text="Perda de Pacotes:")
+        self.dash_name_labels['loss'].grid(row=3, column=0, sticky="w", padx=5, pady=2)
         self.dash_value_labels['loss'] = ttk.Label(dash_grid, textvariable=self.dash_value_vars['loss'])
         self.dash_value_labels['loss'].grid(row=3, column=1, sticky="w", padx=5, pady=2)
         
@@ -406,38 +423,38 @@ class MainApplication(tk.Tk):
             # Passa o profile_key para o thread de busca
             threading.Thread(target=self.fetch_dashboard_data, args=(host_id, profile_key), daemon=True).start()
 
-    # --- ATUALIZADO: Funções do Dashboard (Lógica Híbrida) ---
+    # --- ATUALIZADO: Funções do Dashboard (Lógica de Busca) ---
     def fetch_dashboard_data(self, host_id, profile_key):
         """(Executado em Thread) Busca dados do Zabbix."""
         if not self.zabbix_client:
             return
         
         try:
-            # 1. Busca os itens padrão (por Chave)
-            key_data = self.zabbix_client.get_host_items_by_key(
-                host_id, 
-                ZABBIX_DASHBOARD_KEY_SEARCH
-            )
-            
-            # 2. Busca os itens de interface (por Nomes)
+            # 1. Busca os itens por NOME
+            # (api_clients.get_host_items_by_name)
             name_data = self.zabbix_client.get_host_items_by_name(
                 host_id, 
-                ZABBIX_DASHBOARD_NAME_SEARCH
+                ZABBIX_DASHBOARD_SEARCH_NAMES
             )
             
-            # 3. Busca o número de problemas (Triggers)
+            # 2. Busca o número de problemas (Triggers)
             problem_count = self.zabbix_client.get_host_problems_count(host_id)
             
-            # 4. Envia os dados e o profile_key para a UI thread
-            self.after(0, self.update_dashboard_ui, key_data, name_data, problem_count, profile_key)
+            # 3. Envia os dados e o profile_key para a UI thread
+            self.after(0, self.update_dashboard_ui, name_data, problem_count, profile_key)
             
         except Exception as e:
             print(f"Erro no thread do dashboard: {e}")
             self.after(0, self.clear_dashboard) 
 
-    def update_dashboard_ui(self, key_data, name_data, problem_count, profile_key):
+    def update_dashboard_ui(self, name_data, problem_count, profile_key):
         """(Executado na UI Thread) Atualiza os labels do dashboard."""
         
+        # --- Mostra os labels base que foram escondidos ---
+        for k in ['uptime', 'cpu', 'latency', 'loss']:
+            self.dash_name_labels[k].grid()
+            self.dash_value_labels[k].grid()
+
         # --- Helper para encontrar o item certo na lista ---
         def find_item_by_parts(data_dict, parts_list):
             for name, item_data in data_dict.items():
@@ -448,41 +465,37 @@ class MainApplication(tk.Tk):
                     return item_data 
             return None 
 
-        # --- Helper para buscar valor por chave ---
-        def get_value_from_key(data_dict, key_prefix, default='N/A'):
-            """Busca um valor no dicionário de chaves (key_data)."""
-            for full_key, item_data in data_dict.items():
-                if full_key.startswith(key_prefix):
-                    return item_data.get('value', default)
-            return default
-
-        # --- Helper para buscar valor por nome ---
+        # --- Helper para formatar valores ---
         def get_value(item_data, default='N/A'):
-            """Pega o valor de um item já encontrado."""
             if item_data:
                 return item_data.get('value', default)
             return default
 
         # --- Métricas Base (Uptime, CPU, Latência, Perda) ---
         # ⚠️ (Voltamos a usar as CHAVES, que são mais confiáveis)
-        uptime_s = get_value_from_key(key_data, 'system.uptime', '0')
+        # ⚠️ ATENÇÃO: Verifique se estes nomes estão corretos!
+        uptime_item = find_item_by_parts(name_data, ['System uptime']) 
+        uptime_s = get_value(uptime_item, '0')
         try:
             uptime_val = int(uptime_s)
             d = uptime_val // (3600*24); h = (uptime_val % (3600*24)) // 3600; m = (uptime_val % 3600) // 60
             self.dash_value_vars['uptime'].set(f"{d}d {h}h {m}m")
         except ValueError: self.dash_value_vars['uptime'].set("N/A")
 
-        cpu_val = get_value_from_key(key_data, 'system.cpu.util', '0')
+        cpu_item = find_item_by_parts(name_data, ['CPU utilization'])
+        cpu_val = get_value(cpu_item, '0')
         try:
             self.dash_value_vars['cpu'].set(f"{float(cpu_val):.2f}%")
         except ValueError: self.dash_value_vars['cpu'].set("N/A")
             
-        lat_val = get_value_from_key(key_data, 'icmpping', '0')
+        lat_item = find_item_by_parts(name_data, ['ICMP response time']) 
+        lat_val = get_value(lat_item, '0')
         try:
             self.dash_value_vars['latency'].set(f"{float(lat_val)*1000:.2f} ms")
         except ValueError: self.dash_value_vars['latency'].set("N/A")
 
-        loss_val = get_value_from_key(key_data, 'icmppingloss', '0')
+        loss_item = find_item_by_parts(name_data, ['ICMP packet loss'])
+        loss_val = get_value(loss_item, '0')
         try:
             loss_f = float(loss_val)
             self.dash_value_vars['loss'].set(f"{loss_f:.1f}%")
@@ -547,8 +560,6 @@ class MainApplication(tk.Tk):
             # Muda L1 (Problemas) de Botão para Label
             self.dash_value_labels['L1_val'].config(style="TLabel", command="")
             
-            # ⚠️ Verifique se os nomes 'Operational status', 'Speed', etc.
-            # ⚠️ são os corretos para os seus itens de firewall!
             set_if_status(self.dash_value_vars['L1_val'], self.dash_value_labels['L1_val'], 
                           find_item_by_parts(name_data, ['wan1', 'Operational status']))
             set_if_status(self.dash_value_vars['R1_val'], self.dash_value_labels['R1_val'], 
@@ -559,6 +570,38 @@ class MainApplication(tk.Tk):
             set_if_data(self.dash_value_vars['R3_val'], find_item_by_parts(name_data, ['wan2', 'Duplex status']))
             set_if_data(self.dash_value_vars['L4_val'], find_item_by_parts(name_data, ['wan1', 'Bits received']), is_bits=True)
             set_if_data(self.dash_value_vars['R4_val'], find_item_by_parts(name_data, ['wan2', 'Bits received']), is_bits=True)
+
+        elif profile_key == 'access_point':
+            # --- NOVO: MODO AP ---
+            
+            # 1. Limpa Uptime e CPU (pois não são relevantes para o AP)
+            self.dash_value_vars['uptime'].set("")
+            self.dash_value_vars['cpu'].set("")
+            # Esconde os labels
+            self.dash_name_labels['uptime'].grid_remove()
+            self.dash_value_labels['uptime'].grid_remove()
+            self.dash_name_labels['cpu'].grid_remove()
+            self.dash_value_labels['cpu'].grid_remove()
+            
+            # 2. Mostra Problemas Ativos
+            self.dash_name_vars['L1_name'].set("Problemas Ativos:")
+            problem_button = self.dash_value_labels['L1_val']
+            if problem_count == -1: # Erro
+                self.dash_value_vars['L1_val'].set("Erro")
+                problem_button.config(style="Problem.TButton", state="disabled", command="")
+            elif problem_count > 0:
+                self.dash_value_vars['L1_val'].set(f"{problem_count}")
+                problem_button.config(style="Problem.TButton", state="normal",
+                                      command=self.show_host_problems)
+            else:
+                self.dash_value_vars['L1_val'].set("0")
+                problem_button.config(style="NoProblem.TButton", state="disabled", command="")
+            
+            # 3. Limpa todos os outros campos dinâmicos
+            for k in ['R1_name', 'L2_name', 'R2_name', 'L3_name', 'R3_name', 'L4_name', 'R4_name']:
+                self.dash_name_vars[k].set("") 
+            for k in ['R1_val', 'L2_val', 'R2_val', 'L3_val', 'R3_val', 'L4_val', 'R4_val']:
+                self.dash_value_vars[k].set("")
 
         else:
             # --- MODO SWITCH/ROUTER (Mostra Problemas) ---
@@ -580,6 +623,7 @@ class MainApplication(tk.Tk):
 
             # 2. Interfaces Down (Label)
             if_down_label = self.dash_value_labels['L2_val']
+            # ⚠️ ACHE O NOME EXATO (ex: "Number of interfaces...down")
             if_down_item = find_item_by_parts(name_data, ['interfaces', 'down'])
             if_down_val = get_value(if_down_item, '0')
             try:
@@ -602,6 +646,13 @@ class MainApplication(tk.Tk):
 
     def clear_dashboard(self):
         """Limpa os dados do dashboard (valores E nomes)."""
+        # --- NOVO: Garante que os labels base estejam visíveis ---
+        for k in ['uptime', 'cpu', 'latency', 'loss']:
+            if k in self.dash_name_labels:
+                self.dash_name_labels[k].grid()
+                self.dash_value_labels[k].grid()
+        # --------------------------------------------------
+        
         self.clear_dashboard_names()
         for k, v in self.dash_value_vars.items():
             v.set("--")
@@ -664,19 +715,46 @@ class MainApplication(tk.Tk):
     # --- FIM DA NOVA FUNÇÃO ---
 
 
+    # --- ATUALIZADO: `determine_command_profile` ---
     def determine_command_profile(self, os, hardware, hostname):
-        # (Função sem mudança)
-        if 'fortiswitch' in os: return 'fortiswitch'
-        if 'fortios' in os: return 'fortinet_firewall'
-        if 'cisco' in os and ('router' in hardware or 'isr' in hardware): return 'cisco_router'
-        if 'cisco' in os and 'switch' in hardware: return 'cisco_switch'
-        if 'huawei' in os: return 'huawei_switch'
-        if 'rt' in hostname: return 'cisco_router'
-        if 'fw' in hostname: return 'fortinet_firewall'
-        if 'fsw' in hostname or ('forti' in hostname and 'sw' in hostname): return 'fortiswitch'
-        if 'sw' in hostname: return 'cisco_switch'
+        if 'fortiswitch' in os: 
+            print("DEBUG: Perfil 'fortiswitch' por inventário 'OS'")
+            return 'fortiswitch'
+        if 'fortios' in os:
+            print("DEBUG: Perfil 'fortinet_firewall' por inventário 'OS'")
+            return 'fortinet_firewall'
+        if 'cisco' in os and ('router' in hardware or 'isr' in hardware):
+            print("DEBUG: Perfil 'cisco_router' por inventário 'OS+Hardware'")
+            return 'cisco_router'
+        if 'cisco' in os and 'switch' in hardware:
+            print("DEBUG: Perfil 'cisco_switch' por inventário 'OS+Hardware'")
+            return 'cisco_switch'
+        if 'huawei' in os:
+            print("DEBUG: Perfil 'huawei_switch' por inventário 'OS'")
+            return 'huawei_switch'
+
+        # --- NOVO: Detecção de AP ---
+        if 'ap' in hostname: 
+            print("DEBUG: Perfil 'access_point' por fallback de hostname 'AP'")
+            return 'access_point'
+        # -----------------------------
+
+        if 'rt' in hostname: 
+            print("DEBUG: Perfil 'cisco_router' por fallback de hostname 'RT'")
+            return 'cisco_router'
+        if 'fw' in hostname: 
+            print("DEBUG: Perfil 'fortinet_firewall' por fallback de hostname 'FW'")
+            return 'fortinet_firewall'
+        if 'fsw' in hostname or ('forti' in hostname and 'sw' in hostname): 
+            print("DEBUG: Perfil 'fortiswitch' por fallback de hostname")
+            return 'fortiswitch'
+        if 'sw' in hostname: 
+            print("DEBUG: Perfil 'cisco_switch' por fallback de hostname 'SW'")
+            return 'cisco_switch'
+
         print(f"DEBUG: Nenhum perfil encontrado para OS='{os}', HW='{hardware}', Hostname='{hostname}'")
         return 'default'
+    # --- FIM DA ATUALIZAÇÃO ---
 
     def populate_commands_frame(self, profile_key):
         # (Função sem mudança)
