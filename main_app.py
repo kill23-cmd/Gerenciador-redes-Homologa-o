@@ -51,7 +51,9 @@ COMMAND_PROFILES = {
         ('Mostrar configuração das interfaces', 'show switch interface'),
         ('Mostar VLANs', 'diagnose switch vlan list'),
         ('Mostrar status interfaces', 'diagnose switch physical-ports summary'),
-        ('Mostrar contatdores de erros', 'diag switch physical-ports port-stats list')
+        ('Mostrar contatdores de erros', 'diag switch physical-ports port-stats list'),
+        ('Mostrar tabela MAC', 'diagnose switch mac-address-table list'),
+        ('Mostrar config', 'show switch config')
     ],
     'huawei_switch': [
         ('Mostrar vizinhos LLDP', 'display lldp ne brief')
